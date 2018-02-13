@@ -54,9 +54,9 @@ class Cart
      */
     protected $_apiCustomer;
     /**
-     * @var \Magento\Directory\Api\CountryInformationAcquirerInterface
+     * @var \Magento\Directory\Model\CountryFactory
      */
-    protected $_countryInformation;
+    protected $_countryFactory;
     /**
      * @var \Magento\Framework\Url
      */
@@ -71,6 +71,7 @@ class Cart
      * @param Product $apiProduct
      * @param Customer $apiCustomer
      * @param \Magento\Directory\Api\CountryInformationAcquirerInterface $countryInformation
+     * @param \Magento\Directory\Model\CountryFactory $countryFactory
      * @param \Magento\Sales\Model\ResourceModel\Order\CollectionFactory $orderCollectionFactory
      * @param \Magento\Framework\Url $urlHelper
      */
@@ -81,7 +82,7 @@ class Cart
         \Magento\Customer\Model\CustomerFactory $customerFactory,
         \Ebizmarts\MailChimp\Model\Api\Product $apiProduct,
         \Ebizmarts\MailChimp\Model\Api\Customer $apiCustomer,
-        \Magento\Directory\Api\CountryInformationAcquirerInterface $countryInformation,
+        \Magento\Directory\Model\CountryFactory $countryFactory,
         \Magento\Sales\Model\ResourceModel\Order\CollectionFactory $orderCollectionFactory,
         \Magento\Framework\Url $urlHelper
     ) {
@@ -93,7 +94,7 @@ class Cart
         $this->_apiProduct              = $apiProduct;
         $this->_apiCustomer             = $apiCustomer;
         $this->_orderCollectionFactory  = $orderCollectionFactory;
-        $this->_countryInformation      = $countryInformation;
+        $this->_countryFactory          = $countryFactory;
         $this->_urlHelper               = $urlHelper;
     }
 
@@ -141,7 +142,7 @@ class Cart
         $convertedCarts->addFieldToFilter('is_active', ['eq' => 0]);
         //join with mailchimp_ecommerce_sync_data table to filter by sync data.
         $convertedCarts->getSelect()->joinLeft(
-            ['m4m' => 'mailchimp_sync_ecommerce'],
+            ['m4m' => $this->_helper->getTableName('mailchimp_sync_ecommerce')],
             "m4m.related_id = main_table.entity_id and m4m.type = '".\Ebizmarts\MailChimp\Helper\Data::IS_QUOTE."'
             AND m4m.mailchimp_store_id = '" . $mailchimpStoreId . "'",
             ['m4m.*']
@@ -199,7 +200,7 @@ class Cart
         $modifiedCarts->addFieldToFilter('store_id', ['eq' => $magentoStoreId]);
         //join with mailchimp_ecommerce_sync_data table to filter by sync data.
         $modifiedCarts->getSelect()->joinLeft(
-            ['m4m' => 'mailchimp_sync_ecommerce'],
+            ['m4m' => $this->_helper->getTableName('mailchimp_sync_ecommerce')],
             "m4m.related_id = main_table.entity_id and m4m.type = '".\Ebizmarts\MailChimp\Helper\Data::IS_QUOTE."'
             AND m4m.mailchimp_store_id = '" . $mailchimpStoreId . "'",
             ['m4m.*']
@@ -213,6 +214,7 @@ class Cart
          * @var $cart \Magento\Quote\Model\Quote
          */
         foreach ($modifiedCarts as $cart) {
+            $this->_token = null;
             $cartId = $cart->getEntityId();
             $allCarts[$this->_counter]['method'] = 'DELETE';
             $allCarts[$this->_counter]['path'] = '/ecommerce/stores/' . $mailchimpStoreId . '/carts/' . $cartId;
@@ -252,7 +254,13 @@ class Cart
             }
 
             // send the products that not already sent
-            $productData = $this->_apiProduct->sendQuoteModifiedProduct($cart, $mailchimpStoreId, $magentoStoreId);
+            try {
+                $productData = $this->_apiProduct->sendQuoteModifiedProduct($cart, $mailchimpStoreId, $magentoStoreId);
+            } catch(\Exception $e) {
+                $error = $e->getMessage();
+                $this->_updateQuote($mailchimpStoreId, $cartId, $this->_date->gmtDate(), $error);
+                continue;
+            }
             if (count($productData)) {
                 foreach ($productData as $p) {
                     $allCarts[$this->_counter] = $p;
@@ -296,7 +304,7 @@ class Cart
         }
         //join with mailchimp_ecommerce_sync_data table to filter by sync data.
         $newCarts->getSelect()->joinLeft(
-            ['m4m' => 'mailchimp_sync_ecommerce'],
+            ['m4m' => $this->_helper->getTableName('mailchimp_sync_ecommerce')],
             "m4m.related_id = main_table.entity_id and m4m.type = '" . \Ebizmarts\MailChimp\Helper\Data::IS_QUOTE . "'
             AND m4m.mailchimp_store_id = '" . $mailchimpStoreId . "'",
             ['m4m.*']
@@ -309,6 +317,7 @@ class Cart
          * @var $cart \Magento\Quote\Model\Quote
          */
         foreach ($newCarts as $cart) {
+            $this->_token = null;
             $cartId = $cart->getEntityId();
             $orderCollection = $this->_getOrderCollection();
             $orderCollection->addFieldToFilter('main_table.customer_email', ['eq' => $cart->getCustomerEmail()])
@@ -344,7 +353,13 @@ class Cart
             }
 
             // send the products that not already sent
-            $productData = $this->_apiProduct->sendQuoteModifiedProduct($cart, $mailchimpStoreId, $magentoStoreId);
+            try {
+                $productData = $this->_apiProduct->sendQuoteModifiedProduct($cart, $mailchimpStoreId, $magentoStoreId);
+            } catch(\Exception $e) {
+                $error = $e->getMessage();
+                $this->_updateQuote($mailchimpStoreId, $cartId, $this->_date->gmtDate(), $error);
+                continue;
+            }
             if (count($productData)) {
                 foreach ($productData as $p) {
                     $allCarts[$this->_counter] = $p;
@@ -381,7 +396,7 @@ class Cart
         $allCartsForEmail->addFieldToFilter('store_id', ['eq' => $magentoStoreId]);
         $allCartsForEmail->addFieldToFilter('customer_email', ['eq' => $email]);
         $allCartsForEmail->getSelect()->joinLeft(
-            ['m4m' => 'mailchimp_sync_ecommerce'],
+            ['m4m' => $this->_helper->getTableName('mailchimp_sync_ecommerce')],
             "m4m.related_id = main_table.entity_id and m4m.type = '".\Ebizmarts\MailChimp\Helper\Data::IS_QUOTE."'
             AND m4m.mailchimp_store_id = '" . $mailchimpStoreId . "'",
             ['m4m.*']
@@ -399,7 +414,6 @@ class Cart
      */
     protected function _makeCart(\Magento\Quote\Model\Quote $cart, $mailchimpStoreId, $magentoStoreId)
     {
-        $this->_token = null;
         $campaignId = $cart->getMailchimpCampaignId();
         $oneCart = [];
         $oneCart['id'] = $cart->getEntityId();
@@ -408,7 +422,7 @@ class Cart
             $oneCart['campaign_id'] = $campaignId;
         }
 
-        $oneCart['checkout_url'] = $this->_getCheckoutUrl($cart);
+        $oneCart['checkout_url'] = $this->_getCheckoutUrl($cart,$magentoStoreId);
         $oneCart['currency_code'] = $cart->getQuoteCurrencyCode();
         $oneCart['order_total'] = $cart->getGrandTotal();
         $oneCart['tax_total'] = 0;
@@ -468,18 +482,10 @@ class Cart
      * @param \Magento\Quote\Model\Quote $cart
      * @return string
      */
-    protected function _getCheckoutUrl(\Magento\Quote\Model\Quote $cart)
+    protected function _getCheckoutUrl(\Magento\Quote\Model\Quote $cart, $storeId)
     {
         $token = md5(rand(0, 9999999));
-        $url = $this->_urlHelper->getUrl(
-            'mailchimp/cart/loadquote',
-            [
-                'id' => $cart->getId(),
-                'token' => $token,
-                '_nosid' => true,
-                '_secure' => true
-            ]
-        );
+        $url = $this->_helper->getCartUrl($storeId,$cart->getId(),$token);
         $this->_token = $token;
         return $url;
     }
@@ -553,10 +559,14 @@ class Cart
             }
 
             if ($billingAddress->getCountryId()) {
-                $country = $this->_countryInformation->getCountryInfo($billingAddress->getCountryId());
-                $countryName = $country->getFullNameLocale();
-                $address['shipping_address']['country'] = $countryName;
-                $address['shipping_address']['country_code'] = $country->getTwoLetterAbbreviation();
+                /**
+                 * @var $country \Magento\Directory\Model\Country
+                 */
+                $country = $this->_countryFactory->create()->loadByCode($billingAddress->getCountryId());
+                $address['shipping_address']['country'] = $country->getName();
+                $address['shipping_address']['country_code'] = $billingAddress->getCountryId();
+
+
             }
 
             if (count($address)) {

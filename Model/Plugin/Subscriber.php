@@ -54,18 +54,14 @@ class Subscriber
         $subscriber,
         $customerId
     ) {
-//        $this->_helper->log(__METHOD__);
         $subscriber->loadByCustomerId($customerId);
-//        if ($subscriber->getMailchimpId() != null) {
-            $api = $this->_api;
+        $api = $this->_api;
         try {
             $md5HashEmail = md5(strtolower($subscriber->getSubscriberEmail()));
             $api->lists->members->update($this->_helper->getDefaultList(), $md5HashEmail, null, 'unsubscribed');
-//                $subscriber->setMailchimpId('')->save();
         } catch (\Exception $e) {
             $this->_helper->log($e->getMessage());
         }
-//        }
         return [$customerId];
     }
 
@@ -73,34 +69,34 @@ class Subscriber
         $subscriber,
         $customerId
     ) {
-//        $this->_helper->log(__METHOD__);
+        /**
+         * @var $subscriber \Magento\Newsletter\Model\Subscriber
+         */
         $subscriber->loadByCustomerId($customerId);
-        $subscriber->setImportMode(true);
-        $storeId = $subscriber->getStoreId();
-        if ($this->_helper->isMailChimpEnabled($storeId)) {
-            $customer = $this->_customer->getById($customerId);
-            $email = $customer->getEmail();
-            $mergeVars = $this->_helper->getMergeVars($customer, $email);
-            $api = $this->_api;
-            $isSubscribeOwnEmail = $this->_customerSession->isLoggedIn()
-                && $this->_customerSession->getCustomerDataObject()->getEmail() == $subscriber->getSubscriberEmail();
-            if ($this->_helper->isDoubleOptInEnabled($storeId) && !$isSubscribeOwnEmail) {
-                $status = 'pending';
-            } else {
-                $status = 'subscribed';
-            }
-            try {
-                $emailHash = md5(strtolower($customer->getEmail()));
-                if (!$subscriber->getMailchimpId()) {
-                    $return = $api->lists->members->addOrUpdate($this->_helper->getDefaultList(), $emailHash, null, $status, $mergeVars, null, null, null, null, $email, $status);
-//                    $this->_helper->log($return);
-//                    if (isset($return['id'])) {
-//                        $subscriber->setMailchimpId($return['id']);
-//                    }
+        if(!$subscriber->isSubscribed()) {
+            $subscriber->setImportMode(true);
+            $storeId = $subscriber->getStoreId();
+            if ($this->_helper->isMailChimpEnabled($storeId)) {
+                $customer = $this->_customer->getById($customerId);
+                $email = $customer->getEmail();
+                $mergeVars = $this->_helper->getMergeVarsBySubscriber($subscriber, $email);
+//            $mergeVars = $this->_helper->getMergeVarsByCustomer($customer, $email);
+                $api = $this->_api;
+                $isSubscribeOwnEmail = $this->_customerSession->isLoggedIn()
+                    && $this->_customerSession->getCustomerDataObject()->getEmail() == $subscriber->getSubscriberEmail();
+                if ($this->_helper->isDoubleOptInEnabled($storeId) && !$isSubscribeOwnEmail) {
+                    $status = 'pending';
+                } else {
+                    $status = 'subscribed';
                 }
-//                $subscriber->setMailchimpId($emailHash)->save();
-            } catch (\Exception $e) {
-                $this->_helper->log($e->getMessage());
+                try {
+                    $emailHash = md5(strtolower($customer->getEmail()));
+                    if (!$subscriber->getMailchimpId()) {
+                        $return = $api->lists->members->addOrUpdate($this->_helper->getDefaultList(), $emailHash, null, $status, $mergeVars, null, null, null, null, $email, $status);
+                    }
+                } catch (\Exception $e) {
+                    $this->_helper->log($e->getMessage());
+                }
             }
         }
         return [$customerId];
@@ -110,7 +106,7 @@ class Subscriber
         $subscriber,
         $email
     ) {
-//        $this->_helper->log(__METHOD__);
+	$subscriber->setImportMode(true);
         $storeId = $this->_storeManager->getStore()->getId();
 
         if ($this->_helper->isMailChimpEnabled($storeId)) {
@@ -120,14 +116,10 @@ class Subscriber
             } else {
                 $status = 'subscribed';
             }
-            $mergeVars = $this->_helper->getMergeVars($subscriber, $email);
+            $mergeVars = $this->_helper->getMergeVarsBySubscriber($subscriber, $email);
             try {
                 $md5HashEmail = md5(strtolower($email));
                 $return = $api->lists->members->addOrUpdate($this->_helper->getDefaultList(), $md5HashEmail, null, $status, $mergeVars, null, null, null, null, $email, $status);
-//                $this->_helper->log($return);
-//                if (isset($return['id'])) {
-//                    $subscriber->setMailchimpId($return['id']);
-//                }
             } catch (\Exception $e) {
                 $this->_helper->log($e->getMessage());
             }
@@ -137,19 +129,15 @@ class Subscriber
 
     public function beforeUnsubscribe(
         $subscriber
-    ) {
-//        $this->_helper->log(__METHOD__);
-//        if ($subscriber->getMailchimpId()) {
-//            $this->_helper->log('has id');
+    )
+    {
             $api = $this->_helper->getApi();
         try {
             $md5HashEmail = md5(strtolower($subscriber->getSubscriberEmail()));
             $api->lists->members->update($this->_helper->getDefaultList(), $md5HashEmail, null, 'unsubscribed');
-//                $subscriber->setMailchimpId('');
         } catch (\Exception $e) {
             $this->_helper->log($e->getMessage());
         }
-//        }
         return null;
     }
 }
