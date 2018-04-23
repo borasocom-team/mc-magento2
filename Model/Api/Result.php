@@ -57,7 +57,8 @@ class Result
         $collection = $this->_batchCollection->create();
         $collection
             ->addFieldToFilter('store_id', ['eq' => $storeId])
-            ->addFieldToFilter('status', ['eq' => 'pending']);
+            ->addFieldToFilter('status', ['eq' => 'pending'])
+            ->addFieldToFilter('mailchimp_store_id', ['eq' => $mailchimpStoreId]);
         /**
          * @var $item \Ebizmarts\MailChimp\Model\MailChimpSyncBatches
          */
@@ -65,10 +66,14 @@ class Result
         foreach ($collection as $item) {
             try {
                 $files = $this->getBatchResponse($item->getBatchId(), $storeId);
-                if (count($files)) {
+                if (is_array($files)&&count($files)) {
                     $this->processEachResponseFile($files, $item->getBatchId(), $mailchimpStoreId, $storeId);
                     $item->setStatus('completed');
                     $item->getResource()->save($item);
+                } elseif($files === false) {
+                    $item->setStatus('canceled');
+                    $item->getResource()->save($item);
+                    continue;
                 }
                 $baseDir = $this->_helper->getBaseDir();
                 if (is_dir($baseDir . DIRECTORY_SEPARATOR . 'var' . DIRECTORY_SEPARATOR . self::MAILCHIMP_TEMP_DIR . DIRECTORY_SEPARATOR . $item->getBatchId())) {
@@ -117,6 +122,7 @@ class Result
             }
         } catch (\Mailchimp_Error $e) {
             $this->_helper->log($e->getMessage());
+            return false;
         } catch (\Exception $e) {
             $this->_helper->log($e->getMessage());
         }

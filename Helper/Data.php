@@ -165,6 +165,10 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
      * @var \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory
      */
     protected $_interestGroupFactory;
+    /**
+     * @var \Magento\Framework\Stdlib\DateTime\DateTime
+     */
+    protected $_date;
 
 
     private $customerAtt    = null;
@@ -197,6 +201,7 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
      * @param \Magento\Directory\Api\CountryInformationAcquirerInterface $countryInformation
      * @param \Magento\Framework\App\ResourceConnection $resource
      * @param \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory
+     * @param \Magento\Framework\Stdlib\DateTime\DateTime $date
      */
     public function __construct(
         \Magento\Framework\App\Helper\Context $context,
@@ -223,7 +228,8 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
         \Magento\Customer\Model\CustomerFactory $customerFactory,
         \Magento\Directory\Api\CountryInformationAcquirerInterface $countryInformation,
         \Magento\Framework\App\ResourceConnection $resource,
-        \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory
+        \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory,
+        \Magento\Framework\Stdlib\DateTime\DateTime $date
     ) {
 
         $this->_storeManager  = $storeManager;
@@ -253,6 +259,7 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
         $this->_customerFactory         = $customerFactory;
         $this->_countryInformation      = $countryInformation;
         $this->_interestGroupFactory    = $interestGroupFactory;
+        $this->_date                    = $date;
         parent::__construct($context);
     }
 
@@ -330,14 +337,16 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
             $customerAtt = $this->getCustomerAtts();
             $data = $this->getConfigValue(self::XML_MERGEVARS, $storeId);
             $data = unserialize($data);
-            foreach ($data as $customerFieldId => $mailchimpName) {
-                $this->_mapFields[] = [
-                    'mailchimp' => strtoupper($mailchimpName),
-                    'customer_field' => $customerAtt[$customerFieldId]['attCode'],
-                    'isDate' => $customerAtt[$customerFieldId]['isDate'],
-                    'isAddress' => $customerAtt[$customerFieldId]['isAddress'],
-                    'options' => $customerAtt[$customerFieldId]['options']
-                ];
+            if(is_array($data)) {
+                foreach ($data as $customerFieldId => $mailchimpName) {
+                    $this->_mapFields[] = [
+                        'mailchimp' => strtoupper($mailchimpName),
+                        'customer_field' => $customerAtt[$customerFieldId]['attCode'],
+                        'isDate' => $customerAtt[$customerFieldId]['isDate'],
+                        'isAddress' => $customerAtt[$customerFieldId]['isAddress'],
+                        'options' => $customerAtt[$customerFieldId]['options']
+                    ];
+                }
             }
         }
         return $this->_mapFields;
@@ -487,6 +496,12 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
         $tableName = $this->_syncBatches->getResource()->getMainTable();
         $connection->update($tableName, ['status' => $status], "mailchimp_store_id = '".$mailchimpStore."'");
     }
+    public function markRegisterAsModified($registerId, $type)
+    {
+        $connection = $this->_mailChimpSyncE->getResource()->getConnection();
+        $tableName = $this->_mailChimpSyncE->getResource()->getMainTable();
+        $connection->update($tableName,['mailchimp_sync_modified' => 1,'batch_id' => null],"type = '".$type."' and related_id = $registerId");
+    }
     public function getMCStoreName($storeId)
     {
         return $this->_storeManager->getStore($storeId)->getFrontendName();
@@ -534,26 +549,28 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     {
         $mergeVars = [];
         $mapFields = $this->getMapFields($storeId);
-        foreach ($mapFields as $map) {
-            $value = $customer->getData($map['customer_field']);
-            if($value) {
-                if ($map['isDate']) {
-                    $format = $this->getDateFormat();
-                    if($map['customer_field']=='dob') {
-                        $format = substr($format,0,3);
-                    }
-                    $value = date($format, strtotime($value));
-                } elseif($map['isAddress']) {
-                    $value = $this->_getAddressValues($customer->getPrimaryAddress($map['customer_field']));
-                } elseif(count($map['options'])) {
-                    foreach($map['options'] as $option) {
-                        if($option['value']==$value) {
-                            $value = $option['label'];
-                            break;
+        if(is_array($mapFields)) {
+            foreach ($mapFields as $map) {
+                $value = $customer->getData($map['customer_field']);
+                if ($value) {
+                    if ($map['isDate']) {
+                        $format = $this->getDateFormat();
+                        if ($map['customer_field'] == 'dob') {
+                            $format = substr($format, 0, 3);
+                        }
+                        $value = date($format, strtotime($value));
+                    } elseif ($map['isAddress']) {
+                        $value = $this->_getAddressValues($customer->getPrimaryAddress($map['customer_field']));
+                    } elseif (count($map['options'])) {
+                        foreach ($map['options'] as $option) {
+                            if ($option['value'] == $value) {
+                                $value = $option['label'];
+                                break;
+                            }
                         }
                     }
+                    $mergeVars[$map['mailchimp']] = $value;
                 }
-                $mergeVars[$map['mailchimp']] = $value;
             }
         }
         return (!empty($mergeVars)) ? $mergeVars : null;
@@ -672,19 +689,34 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     {
         $this->resetErrors();
     }
-    public function saveEcommerceData($storeId, $entityId, $date, $error, $modified, $type, $deleted = 0, $token = null)
+    public function saveEcommerceData($storeId, $entityId, $type, $date = null, $error = null , $modified = null, $deleted = null, $token = null)
     {
 
         $chimpSyncEcommerce = $this->getChimpSyncEcommerce($storeId, $entityId, $type);
-        $chimpSyncEcommerce->setMailchimpStoreId($storeId);
-        $chimpSyncEcommerce->setType($type);
-        $chimpSyncEcommerce->setRelatedId($entityId);
-        $chimpSyncEcommerce->setMailchimpSyncModified($modified);
-        $chimpSyncEcommerce->setMailchimpSyncDelta($date);
-        $chimpSyncEcommerce->setMailchimpSyncError($error);
-        $chimpSyncEcommerce->setMailchimpSyncDeleted($deleted);
-        $chimpSyncEcommerce->setMailchimpToken($token);
-        $chimpSyncEcommerce->getResource()->save($chimpSyncEcommerce);
+        if($chimpSyncEcommerce->getRelatedId()==$entityId||!$chimpSyncEcommerce->getRelatedId()&&$modified!=1) {
+            $chimpSyncEcommerce->setMailchimpStoreId($storeId);
+            $chimpSyncEcommerce->setType($type);
+            $chimpSyncEcommerce->setRelatedId($entityId);
+            if ($modified) {
+                $chimpSyncEcommerce->setMailchimpSyncModified($modified);
+            }
+            if ($date) {
+                $chimpSyncEcommerce->setMailchimpSyncDelta($date);
+            } elseif ($modified != 1) {
+                $chimpSyncEcommerce->setBatchId(null);
+            }
+            if ($error) {
+                $chimpSyncEcommerce->setMailchimpSyncError($error);
+            }
+            if ($deleted) {
+                $chimpSyncEcommerce->setMailchimpSyncDeleted($deleted);
+                $chimpSyncEcommerce->setMailchimpSyncModified(0);
+            }
+            if ($token) {
+                $chimpSyncEcommerce->setMailchimpToken($token);
+            }
+            $chimpSyncEcommerce->getResource()->save($chimpSyncEcommerce);
+        }
     }
 
     public function markEcommerceAsModified($relatedId, $type)
@@ -710,6 +742,7 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     }
     public function loadStores()
     {
+        
         $mcUserName = [];
         $connection = $this->_mailChimpStores->getResource()->getConnection();
         $tableName = $this->_mailChimpStores->getResource()->getMainTable();
@@ -737,11 +770,16 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
                 if ($store['platform']!=self::PLATFORM) {
                     continue;
                 }
+                if(isset($store['connected_site'])) {
+                    $name = $store['name'];
+                } else {
+                    $name = $store['name'].' (Warning: not connected)';
+                }
                 $mstore = $this->_mailChimpStoresFactory->create();
                 $mstore->setApikey(trim($apiKey));
                 $mstore->setStoreid($store['id']);
                 $mstore->setListId($store['list_id']);
-                $mstore->setName($store['name']);
+                $mstore->setName($name);
                 $mstore->setPlatform($store['platform']);
                 $mstore->setIsSync($store['is_syncing']);
                 $mstore->setEmailAddress($store['email_address']);
@@ -778,8 +816,8 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     }
     public function getJsUrl($storeId)
     {
-        $url = '';
-        if ($this->getConfigValue(self::XML_PATH_ACTIVE, $storeId)) {
+        $url = $this->getConfigValue(self::XML_MAILCHIMP_JS_URL, $storeId);
+        if ($this->getConfigValue(self::XML_PATH_ACTIVE, $storeId) && !$url) {
             $mailChimpStoreId = $this->getConfigValue(self::XML_MAILCHIMP_STORE, $storeId);
             $api = $this->getApi($storeId);
             $storeData = $api->ecommerce->stores->get($mailChimpStoreId);
@@ -829,8 +867,10 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
             // the urlencode of the hookUrl not work
             $ret = $api->lists->webhooks->add($listId, $hookUrl, $events, $sources);
         } catch (\Mailchimp_Error $e) {
-            $this->log($e->getMessage());
+            $this->log(__METHOD__.' '.$e->getMessage());
+            $ret ['message']= $e->getMessage();
         }
+        return $ret;
     }
     public function deleteWebHook($apikey, $listId)
     {
@@ -977,6 +1017,16 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
                 }
             }
         }
+        $this->log($interest);
         return $interest;
     }
+    public function getGmtDate($format = null)
+    {
+        return $this->_date->gmtDate($format);
+    }
+    public function getGmtTimeStamp()
+    {
+        return $this->_date->gmtTimestamp();
+    }
+
 }
