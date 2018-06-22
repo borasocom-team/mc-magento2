@@ -354,6 +354,8 @@ class Product
             $data["image_url"] = $this->_helper->getBaserUrl($magentoStoreId, \Magento\Framework\UrlInterface::URL_TYPE_MEDIA).$filePath;
         } elseif ($this->_parentImage) {
             $data['image_url'] = $this->_parentImage;
+        } else {
+            $data['image_url'] = '';
         }
         $data["published_at_foreign"] = "";
         if ($isVarient) {
@@ -416,12 +418,6 @@ class Product
                 $data["description"] = $product->getData('description');
             }
 
-            //mailchimp product type (magento category)
-//            $categoryIds = $product->getCategoryIds();
-//            if (count($categoryIds)) {
-//                $category = $this->_categoryRepository->get($categoryIds[0]);
-//                $data["type"] = $category->getName();
-//            }
             $categoryName = $this->getProductCategories($product,$magentoStoreId);
             if($categoryName) {
                 $data['type'] = $data['vendor'] = $categoryName;
@@ -440,7 +436,11 @@ class Product
                 }
             }
             if ($this->_childtUrl) {
-                $data["url"] = $this->_childtUrl;
+                if ($product->getTypeId() == \Magento\Catalog\Model\Product\Type::TYPE_SIMPLE ||
+                    $product->getTypeId() == \Magento\Catalog\Model\Product\Type::TYPE_VIRTUAL ||
+                    $product->getTypeId() == "downloadable") {
+                    $data["url"] = $this->_childtUrl;
+                }
                 $this->_childtUrl = null;
             }
             $this->_parentImage = null;
@@ -496,11 +496,11 @@ class Product
             }
             if ($productSyncData->getMailchimpSyncModified() &&
                 $productSyncData->getMailchimpSyncDelta() > $this->_helper->getMCMinSyncDateFlag()) {
-                $data = array_merge($this->_buildOldProductRequest($product, $batchId, $mailchimpStoreId, $magentoStoreId), $data); 
+                $data[] = $this->_buildOldProductRequest($product, $batchId, $mailchimpStoreId, $magentoStoreId);
                 $this->_updateProduct($mailchimpStoreId, $product->getId());
             } elseif (!$productSyncData->getMailchimpSyncDelta() ||
                 $productSyncData->getMailchimpSyncDelta() < $this->_helper->getMCMinSyncDateFlag()) {
-                $data = array_merge($this->_buildNewProductRequest($product, $mailchimpStoreId, $magentoStoreId), $data); 
+                $data[] = $this->_buildNewProductRequest($product, $mailchimpStoreId, $magentoStoreId);
                 $this->_updateProduct($mailchimpStoreId, $product->getId());
             }
         }
@@ -530,11 +530,11 @@ class Product
 
             if ($productSyncData->getMailchimpSyncModified() &&
                 $productSyncData->getMailchimpSyncDelta() > $this->_helper->getMCMinSyncDateFlag()) {
-                $data = array_merge($this->_buildOldProductRequest($product, $batchId, $mailchimpStoreId, $magentoStoreId), $data); 
+                $data[] = $this->_buildOldProductRequest($product, $batchId, $mailchimpStoreId, $magentoStoreId);
                 $this->_updateProduct($mailchimpStoreId, $product->getId());
             } elseif (!$productSyncData->getMailchimpSyncDelta() ||
                 $productSyncData->getMailchimpSyncDelta() < $this->_helper->getMCMinSyncDateFlag()) {
-                $data = array_merge($this->_buildNewProductRequest($product, $mailchimpStoreId, $magentoStoreId), $data); 
+                $data[] = $this->_buildNewProductRequest($product, $mailchimpStoreId, $magentoStoreId);
                 $this->_updateProduct($mailchimpStoreId, $product->getId());
             }
         }
