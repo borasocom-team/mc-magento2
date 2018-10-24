@@ -22,6 +22,9 @@ class PromoRules
     const TARGET_PER_ITEM = 'per_item';
     const TARGET_TOTAL = 'total';
     const TARGET_SHIPPING = 'shipping';
+    const FREESHIPPING_NO = 0;
+    const FREESHIPPING_FOR_MATHINGI_TEMS_ONLY = 1;
+    const FREESHIPPING_FOR_SHIPMENT_WITH_MATCHING_ITEMS = 3;
     const MAX = 100;
 
     private $_batchId;
@@ -97,16 +100,16 @@ class PromoRules
             try {
                 $mailchimpRule = $api->ecommerce->promoCodes->getAll($mailchimpStoreId, $ruleId);
                 foreach ($mailchimpRule['promo_codes'] as $promoCode) {
-                    $this->_helper->ecommerceDeleteAllByIdType($promoCode['id'], \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_CODE);
+                    $this->_helper->ecommerceDeleteAllByIdType($promoCode['id'], \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_CODE, $mailchimpStoreId);
                 }
                 $batchArray[$count]['method'] = 'DELETE';
                 $batchArray[$count]['path'] = "/ecommerce/stores/$mailchimpStoreId/promo-rules/$ruleId";
                 $batchArray[$count]['operation_id'] = $this->_batchId . '_' . $ruleId;
                 $count++;
             } catch(\Mailchimp_Error $e) {
-                $this->_helper->log("The Rule $ruleId is already deleted");
+                $this->_helper->log($e->getFriendlyMessage());
             }
-            $this->_helper->ecommerceDeleteAllByIdType($ruleId, \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_RULE);
+            $this->_helper->ecommerceDeleteAllByIdType($ruleId, \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_RULE, $mailchimpStoreId);
 
         }
         return $batchArray;
@@ -135,12 +138,15 @@ class PromoRules
         $api = $this->_helper->getApi($magentoStoreId);
         foreach($collection as $rule) {
             $ruleId = $rule->getRuleId();
-            $mailchimpRule = $api->ecommerce->promoCodes->getAll($mailchimpStoreId,$ruleId);
-            foreach($mailchimpRule['promo_codes'] as $promoCode)
-            {
-                $this->_helper->ecommerceDeleteAllByIdType($promoCode['id'], \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_CODE);
+            try {
+                $mailchimpRule = $api->ecommerce->promoCodes->getAll($mailchimpStoreId, $ruleId);
+                foreach ($mailchimpRule['promo_codes'] as $promoCode) {
+                    $this->_helper->ecommerceDeleteAllByIdType($promoCode['id'], \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_CODE,$mailchimpStoreId);
+                }
+            } catch(\Mailchimp_Error $e) {
+                $this->_helper->log($e->getFriendlyMessage());
             }
-            $this->_helper->ecommerceDeleteAllByIdType($rule->getRuleId(), \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_RULE);
+            $this->_helper->ecommerceDeleteAllByIdType($rule->getRuleId(), \Ebizmarts\MailChimp\Helper\Data::IS_PROMO_RULE, $mailchimpStoreId);
             $batchArray[$count]['method'] = 'DELETE';
             $batchArray[$count]['path'] = "/ecommerce/stores/$mailchimpStoreId/promo-rules/$ruleId";
             $batchArray[$count]['operation_id'] = $this->_batchId. '_' . $rule->getRuleId();
@@ -194,15 +200,23 @@ class PromoRules
             $data['ends_at'] = $toDate;
         }
         $promoAction = $rule->getSimpleAction();
-        $data['type'] = $this->_getMailChimpType($promoAction);
-        if($data['type']==self::TYPE_PERCENTAGE) {
-            $data['amount'] = $rule->getDiscountAmount()/100;
-        } else {
-            $data['amount'] = $rule->getDiscountAmount();
+        $shipping = $rule->getSimpleFreeShipping();
+        $data['type'] = $this->_getMailChimpType($promoAction,$shipping);
+        $data['target'] = $this->_getMailChimpTarget($promoAction, $shipping);
+        switch ($data['type']) {
+            case self::TYPE_PERCENTAGE:
+                $data['amount'] = $rule->getDiscountAmount()/100;
+                break;
+            case self::TYPE_FIXED:
+                if($data['target']!=self::TARGET_SHIPPING) {
+                    $data['amount'] = $rule->getDiscountAmount();
+                } else {
+                    $data['amount'] = 0;
+                }
+                break;
         }
-        $data['target'] = $this->_getMailChimpTarget($promoAction);
         $data['enabled'] = (bool)$rule->getIsActive();
-        if(!$data['target']||!$data['amount']||!$data['type']) {
+        if(!$data['target']||!$data['type']) {
             return [];
         }
 
@@ -213,17 +227,21 @@ class PromoRules
      * @param $action
      * @return null|string
      */
-    private function _getMailChimpType($action)
+    private function _getMailChimpType($action,$shipping)
     {
         $mailChimpType = null;
-        switch ($action) {
-            case \Magento\SalesRule\Model\Rule::BY_PERCENT_ACTION:
-                $mailChimpType = self::TYPE_PERCENTAGE;
-                break;
-            case \Magento\SalesRule\Model\Rule::BY_FIXED_ACTION:
-            case \Magento\SalesRule\Model\Rule::CART_FIXED_ACTION:
-                $mailChimpType = self::TYPE_FIXED;
-                break;
+        if($shipping==self::FREESHIPPING_NO) {
+            switch ($action) {
+                case \Magento\SalesRule\Model\Rule::BY_PERCENT_ACTION:
+                    $mailChimpType = self::TYPE_PERCENTAGE;
+                    break;
+                case \Magento\SalesRule\Model\Rule::BY_FIXED_ACTION:
+                case \Magento\SalesRule\Model\Rule::CART_FIXED_ACTION:
+                    $mailChimpType = self::TYPE_FIXED;
+                    break;
+            }
+        } else {
+            $mailChimpType = self::TYPE_FIXED;
         }
         return $mailChimpType;
     }
@@ -232,17 +250,21 @@ class PromoRules
      * @param $action
      * @return null|string
      */
-    private function _getMailChimpTarget($action)
+    private function _getMailChimpTarget($action,$shipping)
     {
         $mailChimpTarget = null;
-        switch ($action) {
-            case \Magento\SalesRule\Model\Rule::CART_FIXED_ACTION:
-            case \Magento\SalesRule\Model\Rule::BY_PERCENT_ACTION:
-                $mailChimpTarget = self::TARGET_TOTAL;
-                break;
-            case \Magento\SalesRule\Model\Rule::BY_FIXED_ACTION:
-                $mailChimpTarget = self::TARGET_PER_ITEM;
-                break;
+        if($shipping==self::FREESHIPPING_NO) {
+            switch ($action) {
+                case \Magento\SalesRule\Model\Rule::CART_FIXED_ACTION:
+                case \Magento\SalesRule\Model\Rule::BY_PERCENT_ACTION:
+                    $mailChimpTarget = self::TARGET_TOTAL;
+                    break;
+                case \Magento\SalesRule\Model\Rule::BY_FIXED_ACTION:
+                    $mailChimpTarget = self::TARGET_PER_ITEM;
+                    break;
+            }
+        } else {
+            $mailChimpTarget = self::TARGET_SHIPPING;
         }
         return $mailChimpTarget;
     }

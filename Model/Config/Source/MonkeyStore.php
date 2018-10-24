@@ -28,7 +28,7 @@ class MonkeyStore implements \Magento\Framework\Option\ArrayInterface
     ) {
         $storeId = (int) $request->getParam("store", 0);
         if($request->getParam('website',0)) {
-            $scope = 'websites';
+            $scope = 'website';
             $storeId = $request->getParam('website',0);
         }
         elseif($request->getParam('store',0)) {
@@ -38,11 +38,11 @@ class MonkeyStore implements \Magento\Framework\Option\ArrayInterface
         else {
             $scope = 'default';
         }
-        if ($helper->getApiKey($storeId)) {
+        if ($helper->getApiKey($storeId, $scope)) {
             try {
-                $this->options = $helper->getApi($storeId)->ecommerce->stores->get(null, null, null, \Ebizmarts\MailChimp\Helper\Data::MAXSTORES);
-            } catch (\Exception $e) {
-                $helper->log($e->getMessage());
+                $this->options = $helper->getApi($storeId,$scope)->ecommerce->stores->get(null, null, null, \Ebizmarts\MailChimp\Helper\Data::MAXSTORES);
+            } catch (\Mailchimp_Error $e) {
+                $helper->log($e->getFriendlyMessage());
             }
         }
     }

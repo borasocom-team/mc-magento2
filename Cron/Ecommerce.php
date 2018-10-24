@@ -110,11 +110,16 @@ class Ecommerce
 
     public function execute()
     {
+
         $connection = $this->_chimpSyncEcommerce->getResource()->getConnection();
         $tableName = $this->_chimpSyncEcommerce->getResource()->getMainTable();
         $connection->delete($tableName, 'batch_id is null and mailchimp_sync_modified != 1');
 
         foreach ($this->_storeManager->getStores() as $storeId => $val) {
+            if(!$this->_ping($storeId)) {
+                $this->_helper->log('MailChimp is not available');
+                return;
+            }
             $this->_storeManager->setCurrentStore($storeId);
             $listId = $this->_helper->getGeneralList($storeId);
             if ($this->_helper->getConfigValue(\Ebizmarts\MailChimp\Helper\Data::XML_PATH_ACTIVE, $storeId)) {
@@ -163,21 +168,33 @@ class Ecommerce
         $countProducts = 0;
         $countOrders = 0;
         $batchArray = [];
+        $this->_helper->resetCounters();
         $results = $this->_apiSubscribers->sendSubscribers($storeId, $listId);
         if ($this->_helper->getConfigValue(\Ebizmarts\MailChimp\Helper\Data::XML_PATH_ECOMMERCE_ACTIVE, $storeId)) {
+            $this->_helper->log('Generate Products payload');
             $products = $this->_apiProduct->_sendProducts($storeId);
             $countProducts = count($products);
             $results = array_merge($results, $products);
+
+            $this->_helper->log('Generate Customers payload');
             $customers = $this->_apiCustomer->sendCustomers($storeId);
             $countCustomers = count($customers);
             $results = array_merge($results, $customers);
+
+            $this->_helper->log('Generate Orders payload');
             $orders = $this->_apiOrder->sendOrders($storeId);
             $countOrders = count($orders);
             $results = array_merge($results, $orders);
+
+            $this->_helper->log('Generate Carts payload');
             $carts = $this->_apiCart->createBatchJson($storeId);
             $results = array_merge($results, $carts);
+
+            $this->_helper->log('Generate Rules payload');
             $rules = $this->_apiPromoRules->sendRules($storeId);
             $results = array_merge($results, $rules);
+
+            $this->_helper->log('Generate Coupons payload');
             $coupons = $this->_apiPromoCodes->sendCoupons($storeId);
             $results = array_merge($results, $coupons);
         }
@@ -195,17 +212,17 @@ class Ecommerce
                     if (!isset($batchResponse['id'])) {
                         $this->_helper->log('error in the call to batch');
                     } else {
-                        $this->_helper->log(var_export($batchResponse, true));
                         $this->_mailChimpSyncBatches->setStoreId($storeId);
                         $this->_mailChimpSyncBatches->setBatchId($batchResponse['id']);
                         $this->_mailChimpSyncBatches->setStatus($batchResponse['status']);
                         $this->_mailChimpSyncBatches->setMailchimpStoreId($mailchimpStoreId);
                         $this->_mailChimpSyncBatches->getResource()->save($this->_mailChimpSyncBatches);
                         $batchId = $batchResponse['id'];
+                        $this->_showResume($batchId);
                     }
                 }
             } catch (\Mailchimp_Error $e) {
-                $this->_helper->log('MailChimp error ' . $e->getMessage());
+                $this->_helper->log($e->getFriendlyMessage());
             } catch (\Exception $e) {
                 $this->_helper->log("Json encode fails");
                 $this->_helper->log(var_export($batchArray, true));
@@ -236,11 +253,29 @@ class Ecommerce
      */
     protected function apiUpdateSyncFlag($storeId, $mailchimpStoreId)
     {
-        $api = $this->_helper->getApi($storeId);
         try {
+            $api = $this->_helper->getApi($storeId);
             $api->ecommerce->stores->edit($mailchimpStoreId, null, null, null, null, null, null, null, null, null, null, false);
         } catch (\Mailchimp_Error $e) {
-            $this->_helper->log('MailChimp error when updating syncing flag for store ' . $storeId . ': ' . $e->getMessage());
+            $this->_helper->log('MailChimp error when updating syncing flag for store ' . $storeId);
+            $this->_helper->log($e->getFriendlyMessage());
         }
+    }
+    protected function _ping($storeId)
+    {
+        try {
+            $api = $this->_helper->getApi($storeId);
+            $api->root->info();
+        } catch (\Mailchimp_Error $e) {
+            $this->_helper->log($e->getFriendlyMessage());
+            return false;
+        }
+        return true;
+    }
+    protected function _showResume($batchId)
+    {
+        $this->_helper->log("Sent batch $batchId");
+        $this->_helper->log($this->_helper->getCounters());
+
     }
 }

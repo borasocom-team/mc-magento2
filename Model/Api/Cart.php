@@ -140,7 +140,7 @@ class Cart
             ['m4m.*']
         );
         // be sure that the quotes are already in mailchimp and not deleted
-        $convertedCarts->getSelect()->where("m4m.mailchimp_sync_deleted = 0");
+        $convertedCarts->getSelect()->where("m4m.mailchimp_sync_deleted is null and m4m.related_id is not null");
         // limit the collection
         $convertedCarts->getSelect()->limit(self::BATCH_LIMIT);
         /**
@@ -218,7 +218,7 @@ class Cart
              * @var $customer \Magento\Customer\Model\Customer
              */
             $customer = $this->_customerFactory->create();
-            $customer->setWebsiteId($magentoStoreId);
+            $customer->setWebsiteId($this->_helper->getWebsiteId($magentoStoreId));
             $customer->loadByEmail($cart->getCustomerEmail());
 
             if ($customer->getEmail() != $cart->getCustomerEmail()) {
@@ -264,6 +264,7 @@ class Cart
             if (count($cart->getAllVisibleItems())) {
                 $cartJson = $this->_makeCart($cart, $mailchimpStoreId, $magentoStoreId);
                 if ($cartJson!="") {
+                    $this->_helper->modifyCounter(\Ebizmarts\MailChimp\Helper\Data::QUO_MOD);
                     $allCarts[$this->_counter]['method'] = 'POST';
                     $allCarts[$this->_counter]['path'] = '/ecommerce/stores/' . $mailchimpStoreId . '/carts';
                     $allCarts[$this->_counter]['operation_id'] = $this->_batchId . '_' . $cartId;
@@ -304,6 +305,8 @@ class Cart
         );
         // be sure that the quotes are already in mailchimp and not deleted
         $newCarts->getSelect()->where("m4m.mailchimp_sync_delta IS NULL");
+
+
         // limit the collection
         $newCarts->getSelect()->limit(self::BATCH_LIMIT);
         /**
@@ -321,7 +324,7 @@ class Cart
                 continue;
             }
             $customer = $this->_customerFactory->create();
-            $customer->setWebsiteId($magentoStoreId);
+            $customer->setWebsiteId($this->_helper->getWebsiteId($magentoStoreId));
             $customer->loadByEmail($cart->getCustomerEmail());
 
             if ($customer->getEmail() != $cart->getCustomerEmail()) {
@@ -362,6 +365,7 @@ class Cart
 
             $cartJson = $this->_makeCart($cart, $mailchimpStoreId, $magentoStoreId);
             if ($cartJson!="") {
+                $this->_helper->modifyCounter(\Ebizmarts\MailChimp\Helper\Data::QUO_NEW);
                 $allCarts[$this->_counter]['method'] = 'POST';
                 $allCarts[$this->_counter]['path'] = '/ecommerce/stores/' . $mailchimpStoreId . '/carts';
                 $allCarts[$this->_counter]['operation_id'] = $this->_batchId . '_' . $cartId;
@@ -450,7 +454,7 @@ class Cart
             //id can not be 0 so we add 1 to $itemCount before setting the id.
             $itemCount++;
             $line['id'] = (string)$itemCount;
-            $line['product_id'] = $variantId;
+            $line['product_id'] = $item->getProductId();
             $line['product_variant_id'] = $variantId;
             $line['quantity'] = (int)$item->getQty();
             $line['price'] = $item->getPrice();
@@ -489,7 +493,7 @@ class Cart
         try {
             $customers = $api->ecommerce->customers->getByEmail($mailchimpStoreId, $cart->getCustomerEmail());
         } catch (\Mailchimp_Error $e) {
-            $this->_helper->log($e->getMessage());
+            $this->_helper->log($e->getFriendlyMessage());
         }
 
         if (isset($customers['total_items']) && $customers['total_items'] > 0) {

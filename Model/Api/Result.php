@@ -95,6 +95,10 @@ class Result
             $response = $api->batchOperation->status($batchId);
 
             if (isset($response['status']) && $response['status'] == 'finished') {
+                // Create temporary directory, if that does not exist
+                if (!is_dir($baseDir . DIRECTORY_SEPARATOR . 'var' . DIRECTORY_SEPARATOR . self::MAILCHIMP_TEMP_DIR)) {
+                    mkdir($baseDir . DIRECTORY_SEPARATOR . 'var' . DIRECTORY_SEPARATOR . self::MAILCHIMP_TEMP_DIR);
+                }
                 // get the tar.gz file with the results
                 $fileUrl = urldecode($response['response_body_url']);
                 $fileName = $baseDir . DIRECTORY_SEPARATOR . 'var' . DIRECTORY_SEPARATOR . self::MAILCHIMP_TEMP_DIR . DIRECTORY_SEPARATOR . $batchId;
@@ -121,7 +125,7 @@ class Result
                 unlink($fileName . '.tar.gz');
             }
         } catch (\Mailchimp_Error $e) {
-            $this->_helper->log($e->getMessage());
+            $this->_helper->log($e->getFriendlyMessage());
             return false;
         } catch (\Exception $e) {
             $this->_helper->log($e->getMessage());

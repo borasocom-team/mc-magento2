@@ -91,6 +91,11 @@ class Subscriber
                 $this->_helper->log($errorMessage, $storeId);
             }
             if (!empty($subscriberJson)) {
+                if($subscriber->getMailchimpSyncModified()==1) {
+                    $this->_helper->modifyCounter(\Ebizmarts\MailChimp\Helper\Data::SUB_MOD);
+                } else {
+                    $this->_helper->modifyCounter( \Ebizmarts\MailChimp\Helper\Data::SUB_NEW);
+                }
                 $subscriberArray[$counter]['method'] = "PUT";
                 $subscriberArray[$counter]['path'] = "/lists/" . $listId . "/members/" . $md5HashEmail;
                 $subscriberArray[$counter]['operation_id'] = $batchId . '_' . $subscriber->getSubscriberId();
@@ -166,7 +171,7 @@ class Subscriber
             $md5HashEmail = md5(strtolower($subscriber->getSubscriberEmail()));
             $api->lists->members->update($listId, $md5HashEmail, null, 'cleaned');
         } catch(\MailChimp_Error $e) {
-            $this->_helper->log($e->getMessage(), $storeId);
+            $this->_helper->log($e->getFriendlyMessage(), $storeId);
             $this->_message->addErrorMessage($e->getMessage());
         } catch (\Exception $e) {
             $this->_helper->log($e->getMessage(), $storeId);

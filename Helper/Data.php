@@ -43,6 +43,7 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     const XML_INTEREST_IN_SUCCESS    = 'mailchimp/general/interest_in_success';
     const XML_INTEREST_SUCCESS_HTML_BEFORE  = 'mailchimp/general/interest_success_html_before';
     const XML_INTEREST_SUCCESS_HTML_AFTER   = 'mailchimp/general/interest_success_html_after';
+    const XML_MAGENTO_MAIL           = 'mailchimp/general/magentoemail';
 
 
     const ORDER_STATE_OK             = 'complete';
@@ -59,6 +60,18 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     const PLATFORM      = 'Magento2';
     const MAXSTORES     = 200;
 
+    const SUB_MOD       = "SubscriberModified";
+    const SUB_NEW       = "SubscriberNew";
+    const PRO_MOD       = "ProductModified";
+    const PRO_NEW       = "ProductNew";
+    const CUS_MOD       = "CustomerModified";
+    const CUS_NEW       = "CustomerNew";
+    const ORD_MOD       = "OrderModified";
+    const ORD_NEW       = "OrderNew";
+    const QUO_MOD       = "QuoteModified";
+    const QUO_NEW       = "QuoteNew";
+
+    protected $counters = [];
     /**
      * @var \Magento\Store\Model\StoreManagerInterface
      */
@@ -285,18 +298,18 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
      * @param null $store
      * @return mixed
      */
-    public function getApiKey($store = null)
+    public function getApiKey($store = null, $scope = null)
     {
-        return $this->getConfigValue(self::XML_PATH_APIKEY, $store);
+        return $this->getConfigValue(self::XML_PATH_APIKEY, $store, $scope);
     }
 
     /**
      * @param null $store
      * @return \Mailchimp
      */
-    public function getApi($store = null)
+    public function getApi($store = null, $scope = null)
     {
-        $apiKey = $this->getApiKey($store);
+        $apiKey = $this->getApiKey($store, $scope);
         $this->_api->setApiKey($apiKey);
         $this->_api->setUserAgent('Mailchimp4Magento' . (string)$this->getModuleVersion());
         return $this->_api;
@@ -486,6 +499,8 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
 //            $storeId = $this->getConfigValue(self::XML_MAILCHIMP_STORE);
             $this->getApi()->ecommerce->stores->delete($mailchimpStore);
             $this->markAllBatchesAs($mailchimpStore, 'canceled');
+        } catch(\Mailchimp_Error $e) {
+            $this->log($e->getFriendlyMessage());
         } catch (Exception $e) {
             $this->log($e->getMessage());
         }
@@ -524,6 +539,8 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
             try {
                 $this->getApi()->ecommerce->stores->add($mailchimpStoreId, $listId, $name, $currencyCode, self::PLATFORM);
                 return $mailchimpStoreId;
+            } catch(\Mailchimp_Error $e) {
+              $this->log($e->getFriendlyMessage());
             } catch (Exception $e) {
                 return null;
             }
@@ -652,10 +669,14 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
 
     public function getListForMailChimpStore($mailchimpStoreId, $apiKey)
     {
-        $api = $this->getApiByApiKey($apiKey);
-        $store =$api->ecommerce->stores->get($mailchimpStoreId);
-        if (isset($store['list_id'])) {
-            return $store['list_id'];
+        try {
+            $api = $this->getApiByApiKey($apiKey);
+            $store = $api->ecommerce->stores->get($mailchimpStoreId);
+            if (isset($store['list_id'])) {
+                return $store['list_id'];
+            }
+        } catch (\Mailchimp_Error $e) {
+            $this->log($e->getFriendlyMessage());
         }
         return null;
     }
@@ -727,9 +748,9 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
     {
         $this->_mailChimpSyncE->markAllAsDeleted($relatedId,$type, $relatedDeletedId);
     }
-    public function ecommerceDeleteAllByIdType($id, $type)
+    public function ecommerceDeleteAllByIdType($id, $type, $mailchimpStoreId)
     {
-        $this->_mailChimpSyncE->deleteAllByIdType($id, $type);
+        $this->_mailChimpSyncE->deleteAllByIdType($id, $type, $mailchimpStoreId);
     }
 
     public function getChimpSyncEcommerce($storeId, $id, $type)
@@ -758,7 +779,7 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
             try {
                 $apiStores = $this->_api->ecommerce->stores->get(null, null, null, self::MAXSTORES);
             } catch(\Mailchimp_Error $mailchimpError) {
-                $this->log($mailchimpError->getMessage());
+                $this->log($mailchimpError->getFriendlyMessage());
                 continue;
             } catch(\Mailchimp_HttpError $mailchimpError) {
                 $this->log($mailchimpError->getMessage());
@@ -808,7 +829,7 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
                         $mstore->getResource()->save($mstore);
                     }
                 } catch (\Mailchimp_Error $e) {
-                    $this->log($e->getMessage());
+                    $this->log($e->getFriendlyMessage());
                 }
             }
         }
@@ -818,16 +839,20 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
         $url = $this->getConfigValue(self::XML_MAILCHIMP_JS_URL, $storeId);
         if ($this->getConfigValue(self::XML_PATH_ACTIVE, $storeId) && !$url) {
             $mailChimpStoreId = $this->getConfigValue(self::XML_MAILCHIMP_STORE, $storeId);
-            $api = $this->getApi($storeId);
-            $storeData = $api->ecommerce->stores->get($mailChimpStoreId);
-            if (isset($storeData['connected_site']['site_script']['url'])) {
-                $url = $storeData['connected_site']['site_script']['url'];
-                $this->_config->saveConfig(
-                    self::XML_MAILCHIMP_JS_URL,
-                    $url,
-                    \Magento\Store\Model\ScopeInterface::SCOPE_STORES,
-                    $storeId
-                );
+            try {
+                $api = $this->getApi($storeId);
+                $storeData = $api->ecommerce->stores->get($mailChimpStoreId);
+                if (isset($storeData['connected_site']['site_script']['url'])) {
+                    $url = $storeData['connected_site']['site_script']['url'];
+                    $this->_config->saveConfig(
+                        self::XML_MAILCHIMP_JS_URL,
+                        $url,
+                        \Magento\Store\Model\ScopeInterface::SCOPE_STORES,
+                        $storeId
+                    );
+                }
+            } catch(\Mailchimp_Error $e) {
+                $this->log($e->getFriendlyMessage());
             }
         }
         return $url;
@@ -857,16 +882,16 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
             'admin' => true,
             'api' => true
         ];
-        $api = $this->getApiByApiKey($apikey);
-        $hookUrl = $this->_getUrl(\Ebizmarts\MailChimp\Controller\WebHook\Index::WEBHOOK__PATH, [
+        try {
+            $api = $this->getApiByApiKey($apikey);
+            $hookUrl = $this->_getUrl(\Ebizmarts\MailChimp\Controller\WebHook\Index::WEBHOOK__PATH, [
             'wkey' => $this->getWebhooksKey(),
             '_nosid' => true,
             '_secure' => true]);
-        try {
             // the urlencode of the hookUrl not work
             $ret = $api->lists->webhooks->add($listId, $hookUrl, $events, $sources);
         } catch (\Mailchimp_Error $e) {
-            $this->log(__METHOD__.' '.$e->getMessage());
+            $this->log($e->getFriendlyMessage());
             $ret ['message']= $e->getMessage();
         }
         return $ret;
@@ -876,17 +901,21 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
         if (empty($listId)) {
             return;
         }
-        $api = $this->getApiByApiKey($apikey);
-        $webhooks = $api->lists->webhooks->getAll($listId);
-        $hookUrl = $this->_getUrl(\Ebizmarts\MailChimp\Controller\WebHook\Index::WEBHOOK__PATH, [
-            '_nosid' => true,
-            '_secure' => true]);
-        if (isset($webhooks['webhooks'])) {
-            foreach ($webhooks['webhooks'] as $wh) {
-                if ($wh['url'] == $hookUrl) {
-                    $api->lists->webhooks->delete($listId, $wh['id']);
+        try {
+            $api = $this->getApiByApiKey($apikey);
+            $webhooks = $api->lists->webhooks->getAll($listId);
+            $hookUrl = $this->_getUrl(\Ebizmarts\MailChimp\Controller\WebHook\Index::WEBHOOK__PATH, [
+                '_nosid' => true,
+                '_secure' => true]);
+            if (isset($webhooks['webhooks'])) {
+                foreach ($webhooks['webhooks'] as $wh) {
+                    if ($wh['url'] == $hookUrl) {
+                        $api->lists->webhooks->delete($listId, $wh['id']);
+                    }
                 }
             }
+        } catch(\Mailchimp_Error $e) {
+            $this->log($e->getFriendlyMessage());
         }
     }
 
@@ -962,19 +991,23 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
         } else {
             $interest = [];
         }
-        $api = $this->getApi($storeId);
-        $listId =$this->getConfigValue(self::XML_PATH_LIST,$storeId);
-        $allInterest = $api->lists->interestCategory->getAll($listId);
-        foreach($allInterest['categories'] as $item) {
-            if(in_array($item['id'],$interest)) {
-                $rc[$item['id']]['interest'] = ['id' => $item['id'], 'title' => $item['title'], 'type' => $item['type']];
+        try {
+            $api = $this->getApi($storeId);
+            $listId = $this->getConfigValue(self::XML_PATH_LIST, $storeId);
+            $allInterest = $api->lists->interestCategory->getAll($listId);
+            foreach ($allInterest['categories'] as $item) {
+                if (in_array($item['id'], $interest)) {
+                    $rc[$item['id']]['interest'] = ['id' => $item['id'], 'title' => $item['title'], 'type' => $item['type']];
+                }
             }
-        }
-        foreach($interest as $interestId) {
-            $mailchimpInterest = $api->lists->interestCategory->interests->getAll($listId,$interestId);
-            foreach($mailchimpInterest['interests'] as $mi) {
-                $rc[$mi['category_id']]['category'][$mi['display_order']] = ['id'=>$mi['id'],'name'=>$mi['name'],'checked'=>false];
+            foreach ($interest as $interestId) {
+                $mailchimpInterest = $api->lists->interestCategory->interests->getAll($listId, $interestId);
+                foreach ($mailchimpInterest['interests'] as $mi) {
+                    $rc[$mi['category_id']]['category'][$mi['display_order']] = ['id' => $mi['id'], 'name' => $mi['name'], 'checked' => false];
+                }
             }
+        } catch(\Mailchimp_Error $e) {
+            $this->log($e->getFriendlyMessage());
         }
         return $rc;
     }
@@ -1039,5 +1072,21 @@ class Data extends \Magento\Framework\App\Helper\AbstractHelper
             }
         }
         return $apiKeys;
+    }
+    public function modifyCounter($index, $increment=1)
+    {
+        if(array_key_exists($index,$this->counters)) {
+            $this->counters[$index] = $this->counters[$index] + $increment;
+        } else {
+            $this->counters[$index] = 1;
+        }
+    }
+    public function resetCounters()
+    {
+        $this->counters = [];
+    }
+    public function getCounters()
+    {
+        return $this->counters;
     }
 }
