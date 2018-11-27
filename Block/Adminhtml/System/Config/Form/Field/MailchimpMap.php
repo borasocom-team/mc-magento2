@@ -13,7 +13,7 @@
 
 namespace Ebizmarts\MailChimp\Block\Adminhtml\System\Config\Form\Field;
 
-class MailchimpMap  extends \Magento\Framework\View\Element\Html\Select
+class MailchimpMap extends \Magento\Framework\View\Element\Html\Select
 {
     /**
      * @var \Ebizmarts\MailChimp\Helper\Data
@@ -35,9 +35,9 @@ class MailchimpMap  extends \Magento\Framework\View\Element\Html\Select
         \Magento\Framework\View\Element\Context $context,
         \Magento\Store\Model\StoreManagerInterface $storeManager,
         \Ebizmarts\MailChimp\Helper\Data $helper,
-        array $data=[]
-    )
-    {
+        array $data = []
+    ) {
+    
         parent::__construct($context, $data);
         $this->_helper          = $helper;
         $this->_storeManager    = $storeManager;
@@ -47,9 +47,13 @@ class MailchimpMap  extends \Magento\Framework\View\Element\Html\Select
     {
         $ret = [];
         $api = $this->_helper->getApi($this->_storeManager->getStore()->getId());
-        $merge = $api->lists->mergeFields->getAll($this->_helper->getConfigValue(\Ebizmarts\MailChimp\Helper\Data::XML_PATH_LIST));
-        foreach($merge['merge_fields'] as $item) {
-            $ret[$item['tag']] = $item['tag'].' ('.$item['name'].' : '.$item['type'].')';
+        try {
+            $merge = $api->lists->mergeFields->getAll($this->_helper->getConfigValue(\Ebizmarts\MailChimp\Helper\Data::XML_PATH_LIST));
+            foreach ($merge['merge_fields'] as $item) {
+                $ret[$item['tag']] = $item['tag'] . ' (' . $item['name'] . ' : ' . $item['type'] . ')';
+            }
+        } catch (\Mailchimp_Error $e) {
+            $this->_helper->log($e->getFriendlyMessage());
         }
         return $ret;
     }

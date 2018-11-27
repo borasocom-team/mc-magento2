@@ -35,6 +35,10 @@ class Save
      * @var \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory
      */
     protected $interestGroupFactory;
+    /**
+     * @var \Magento\Framework\Serialize\Serializer\Json
+     */
+    protected $serializer;
 
     /**
      * Save constructor.
@@ -43,20 +47,23 @@ class Save
      * @param \Magento\Newsletter\Model\SubscriberFactory $subscriberFactory
      * @param \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory
      * @param \Magento\Framework\App\Request\Http $request
+     * @param \Magento\Framework\Serialize\Serializer\Json $serializer
      */
     public function __construct(
         \Ebizmarts\MailChimp\Helper\Data $helper,
         \Magento\Customer\Model\Session $customerSession,
         \Magento\Newsletter\Model\SubscriberFactory $subscriberFactory,
         \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory,
-        \Magento\Framework\App\Request\Http $request
-    )
-    {
+        \Magento\Framework\App\Request\Http $request,
+        \Magento\Framework\Serialize\Serializer\Json $serializer
+    ) {
+    
         $this->helper               = $helper;
         $this->customerSession      = $customerSession;
         $this->subscriberFactory    = $subscriberFactory;
         $this->request              = $request;
         $this->interestGroupFactory = $interestGroupFactory;
+        $this->serializer           = $serializer;
     }
     public function afterExecute()
     {
@@ -73,9 +80,9 @@ class Save
 
         try {
             $subscriber->loadByCustomerId($this->customerSession->getCustomerId());
-            if($subscriber->getEmail()==$email) {
-                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(),$subscriber->getStoreId());
-                $interestGroup->setGroupdata(serialize($params));
+            if ($subscriber->getEmail()==$email) {
+                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(), $subscriber->getStoreId());
+                $interestGroup->setGroupdata($this->serializer->serialize($params));
                 $interestGroup->setSubscriberId($subscriber->getSubscriberId());
                 $interestGroup->setStoreId($subscriber->getStoreId());
                 $interestGroup->setUpdatedAt($this->helper->getGmtDate());
@@ -85,20 +92,25 @@ class Save
             } else {
                 $this->subscriberFactory->create()->subscribe($email);
                 $subscriber->loadByEmail($email);
-                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(),$subscriber->getStoreId());
-                $interestGroup->setGroupdata(serialize($params));
+                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(), $subscriber->getStoreId());
+                $interestGroup->setGroupdata($this->serializer->serialize($params));
                 $interestGroup->setSubscriberId($subscriber->getSubscriberId());
                 $interestGroup->setStoreId($subscriber->getStoreId());
                 $interestGroup->setUpdatedAt($this->helper->getGmtDate());
                 $interestGroup->getResource()->save($interestGroup);
             }
-
-        } catch(\Exception $e) {
+        } catch (\Exception $e) {
         }
     }
-    protected function _updateSubscriber($listId, $entityId, $sync_delta = null, $sync_error=null, $sync_modified=null)
+    protected function _updateSubscriber($listId, $entityId, $sync_delta = null, $sync_error = null, $sync_modified = null)
     {
-        $this->helper->saveEcommerceData($listId, $entityId, \Ebizmarts\MailChimp\Helper\Data::IS_SUBSCRIBER,
-            $sync_delta, $sync_error, $sync_modified);
+        $this->helper->saveEcommerceData(
+            $listId,
+            $entityId,
+            \Ebizmarts\MailChimp\Helper\Data::IS_SUBSCRIBER,
+            $sync_delta,
+            $sync_error,
+            $sync_modified
+        );
     }
 }

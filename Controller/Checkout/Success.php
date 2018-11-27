@@ -13,8 +13,6 @@
 
 namespace Ebizmarts\MailChimp\Controller\Checkout;
 
-
-
 class Success extends \Magento\Framework\App\Action\Action
 {
     /**
@@ -37,6 +35,10 @@ class Success extends \Magento\Framework\App\Action\Action
      * @var \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory
      */
     protected $_interestGroupFactory;
+    /**
+     * @var \Magento\Framework\Serialize\Serializer\Json
+     */
+    protected $_serializer;
 
     /**
      * Success constructor.
@@ -46,6 +48,7 @@ class Success extends \Magento\Framework\App\Action\Action
      * @param \Magento\Checkout\Model\Session $checkoutSession
      * @param \Magento\Newsletter\Model\SubscriberFactory $subscriberFactory
      * @param \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory
+     * @param \Magento\Framework\Serialize\Serializer\Json $serializer
      */
     public function __construct(
         \Magento\Framework\App\Action\Context $context,
@@ -53,14 +56,16 @@ class Success extends \Magento\Framework\App\Action\Action
         \Ebizmarts\MailChimp\Helper\Data $helper,
         \Magento\Checkout\Model\Session $checkoutSession,
         \Magento\Newsletter\Model\SubscriberFactory $subscriberFactory,
-        \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory
-    )
-    {
+        \Ebizmarts\MailChimp\Model\MailChimpInterestGroupFactory $interestGroupFactory,
+        \Magento\Framework\Serialize\Serializer\Json $serializer
+    ) {
+    
         $this->_pageFactory         =$pageFactory;
         $this->_helper              = $helper;
         $this->_checkoutSession     = $checkoutSession;
         $this->_subscriberFactory   = $subscriberFactory;
         $this->_interestGroupFactory= $interestGroupFactory;
+        $this->_serializer          = $serializer;
         parent::__construct($context);
     }
 
@@ -76,9 +81,9 @@ class Success extends \Magento\Framework\App\Action\Action
         $interestGroup = $this->_interestGroupFactory->create();
         try {
             $subscriber->loadByEmail($order->getCustomerEmail());
-            if($subscriber->getEmail()==$order->getCustomerEmail()) {
-                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(),$subscriber->getStoreId());
-                $interestGroup->setGroupdata(serialize($params));
+            if ($subscriber->getEmail()==$order->getCustomerEmail()) {
+                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(), $subscriber->getStoreId());
+                $interestGroup->setGroupdata($this->_serializer->serialize($params));
                 $interestGroup->setSubscriberId($subscriber->getSubscriberId());
                 $interestGroup->setStoreId($subscriber->getStoreId());
                 $interestGroup->setUpdatedAt($this->_helper->getGmtDate());
@@ -88,22 +93,28 @@ class Success extends \Magento\Framework\App\Action\Action
             } else {
                 $this->_subscriberFactory->create()->subscribe($order->getCustomerEmail());
                 $subscriber->loadByEmail($order->getCustomerEmail());
-                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(),$subscriber->getStoreId());
-                $interestGroup->setGroupdata(serialize($params));
+                $interestGroup->getBySubscriberIdStoreId($subscriber->getSubscriberId(), $subscriber->getStoreId());
+                $interestGroup->setGroupdata($this->_serializer->serialize($params));
                 $interestGroup->setSubscriberId($subscriber->getSubscriberId());
                 $interestGroup->setStoreId($subscriber->getStoreId());
                 $interestGroup->setUpdatedAt($this->_helper->getGmtDate());
                 $interestGroup->getResource()->save($interestGroup);
             }
-        } catch(\Exception $e) {
+        } catch (\Exception $e) {
             $this->_helper->log($e->getMessage());
         }
         $this->messageManager->addSuccessMessage(__('Thanks for share your interest with us'));
-        $this->_redirect($this->_helper->getBaserUrl($order->getStoreId(),\Magento\Framework\UrlInterface::URL_TYPE_WEB));
+        $this->_redirect($this->_helper->getBaserUrl($order->getStoreId(), \Magento\Framework\UrlInterface::URL_TYPE_WEB));
     }
-    protected function _updateSubscriber($listId, $entityId, $sync_delta = null, $sync_error=null, $sync_modified=null)
+    protected function _updateSubscriber($listId, $entityId, $sync_delta = null, $sync_error = null, $sync_modified = null)
     {
-        $this->_helper->saveEcommerceData($listId, $entityId, \Ebizmarts\MailChimp\Helper\Data::IS_SUBSCRIBER,
-            $sync_delta, $sync_error, $sync_modified);
+        $this->_helper->saveEcommerceData(
+            $listId,
+            $entityId,
+            \Ebizmarts\MailChimp\Helper\Data::IS_SUBSCRIBER,
+            $sync_delta,
+            $sync_error,
+            $sync_modified
+        );
     }
 }
